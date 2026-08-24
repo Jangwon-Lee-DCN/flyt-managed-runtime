@@ -1,0 +1,36 @@
+ARG CUDA_IMAGE=docker.io/nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04@sha256:ad6d59a3bbf3e82c1c849c9ac09cfc2a3e0bbb8655042fd899be6681b3fe2a85
+FROM ${CUDA_IMAGE} AS build
+WORKDIR /src
+COPY . /src
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl libegl-dev libelf-dev libgl-dev libssl-dev libtirpc-dev \
+      libvdpau-dev \
+      pkg-config \
+    && curl --proto '=https' --tlsv1.2 -fsS https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain 1.98.0 --profile minimal \
+    && cd /src/control-managers \
+    && PATH=/root/.cargo/bin:$PATH cargo build --locked --release \
+      --no-default-features --bin flyt-client-manager \
+    && make -C /src/cpu cricket-client.so LIBTIRPC_PREFIX=/usr \
+    && install -d /out \
+    && nvcc -O2 -cudart shared -o /out/flyt-cuda-smoke.bin \
+      /src/tests/acceptance/flyt-cuda-smoke.cu \
+    && install -d /package \
+    && install -m 0755 /src/control-managers/install-flyt-client /package/ \
+    && install -m 0755 /src/control-managers/target/release/flyt-client-manager /package/ \
+    && install -m 0755 /src/cpu/cricket-client.so /package/ \
+    && install -m 0755 /out/flyt-cuda-smoke.bin /package/ \
+    && install -m 0755 /src/control-managers/flyt-cuda-smoke /package/ \
+    && install -m 0644 "$(readlink -f /usr/local/cuda/lib64/libcudart.so.12)" \
+      /package/libcudart.so.12 \
+    && install -m 0644 /src/control-managers/flyt-client-manager.service /package/ \
+    && tar -C /package --sort=name --mtime='UTC 1970-01-01' \
+      --owner=0 --group=0 --numeric-owner -czf /flyt-client.tar.gz \
+      install-flyt-client flyt-client-manager cricket-client.so \
+      flyt-cuda-smoke flyt-cuda-smoke.bin libcudart.so.12 \
+      flyt-client-manager.service \
+    && rm -rf /src/control-managers/target /src/cpu/*.o /src/cpu/*.d /package
+
+FROM docker.io/nginxinc/nginx-unprivileged:1.29.1-alpine-slim@sha256:6859237345ebc1e7abfa93fd83d5534fa77ef0ece230b873e6c708e38ac2a96d
+COPY --from=build /flyt-client.tar.gz /usr/share/nginx/html/flyt-client.tar.gz
+EXPOSE 8080

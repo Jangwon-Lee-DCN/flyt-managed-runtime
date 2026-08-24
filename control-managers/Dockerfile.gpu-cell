@@ -1,0 +1,30 @@
+ARG CUDA_DEVEL_IMAGE=docker.io/nvidia/cuda:12.8.1-cudnn-devel-ubuntu22.04@sha256:ad6d59a3bbf3e82c1c849c9ac09cfc2a3e0bbb8655042fd899be6681b3fe2a85
+ARG CUDA_RUNTIME_IMAGE=docker.io/nvidia/cuda:12.8.1-cudnn-runtime-ubuntu22.04@sha256:17e2934e1fa96152b14f78078bfbafd0f00f391df995dc6c641a720fce1202bb
+FROM ${CUDA_DEVEL_IMAGE} AS runtime_build
+WORKDIR /src
+COPY . /src
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      build-essential ca-certificates curl libelf-dev libssl-dev libtirpc-dev \
+      patchelf pkg-config rpcbind \
+    && curl --proto '=https' --tlsv1.2 -fsS https://sh.rustup.rs \
+      | sh -s -- -y --default-toolchain 1.98.0 --profile minimal \
+    && cd /src/control-managers \
+    && PATH=/root/.cargo/bin:$PATH cargo build --locked --release \
+      --features gpu-node --bin flyt-node-manager \
+    && cd /src \
+    && make -C cpu cricket-rpc-server LIBTIRPC_PREFIX=/usr \
+    && install -d /out \
+    && install -m 0755 control-managers/target/release/flyt-node-manager /out/ \
+    && install -m 0755 cpu/cricket-rpc-server /out/ \
+    && rm -rf control-managers/target cpu/*.o cpu/*.d
+
+FROM ${CUDA_RUNTIME_IMAGE}
+RUN apt-get update && apt-get install -y --no-install-recommends \
+      libelf1 libssl3 libtirpc3 netbase procps rpcbind tini \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=runtime_build /out/flyt-node-manager /opt/flyt/bin/
+COPY --from=runtime_build /out/cricket-rpc-server /opt/flyt/bin/
+COPY control-managers/gpu-cell-entrypoint.sh /usr/local/bin/flyt-gpu-cell-entrypoint
+RUN chmod 0755 /usr/local/bin/flyt-gpu-cell-entrypoint
+ENV FLYT_NODE_MANAGER_CONFIG=/etc/flyt/node-manager.toml
+ENTRYPOINT ["/usr/bin/tini", "--", "/usr/local/bin/flyt-gpu-cell-entrypoint"]

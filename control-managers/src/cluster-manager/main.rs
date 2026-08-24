@@ -23,7 +23,7 @@ fn main() {
 
     let server_nodes_manager = ServerNodesManager::new(&vm_resource_getter);
     let client_handler = client_handler::FlytClientManager::new(&server_nodes_manager);
-    let frontend_handler = FrontendHandler::new(&client_handler, &server_nodes_manager);
+    let frontend_handler = FrontendHandler::new(&client_handler, &server_nodes_manager, &vm_resource_getter);
 
     thread::scope(|s| {
         s.spawn(|| {

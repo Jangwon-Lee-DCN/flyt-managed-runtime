@@ -53,10 +53,13 @@ impl ResourceManagerHandler {
         }
     }
 
-    pub fn connect(&self, address: &str, port: u16) -> Result<(),String> {
+    pub fn connect(&self, address: &str, port: u16, advertise_address: &str) -> Result<(),String> {
         let stream = TcpStream::connect(format!("{}:{}", address, port));
         match stream {
-            Ok(stream) => {
+            Ok(mut stream) => {
+                stream.write_all(format!("{}\n{}\n", FlytApiCommand::SNODE_RMGR_REGISTER,
+                                         advertise_address).as_bytes())
+                    .map_err(|error| error.to_string())?;
                 self.resource_manager_stream.write().unwrap().replace(stream);
                 Ok(())
             }

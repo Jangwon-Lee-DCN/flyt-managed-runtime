@@ -29,7 +29,9 @@ impl VCudaClientManager {
             std::fs::File::create(mqueue_path).unwrap();
         }
 
-        let key = PathProjectIdKey::new(mqueue_path.to_string(), PROJ_ID);
+        // ipc-rs forwards this buffer to ftok(3), which requires a
+        // NUL-terminated path.
+        let key = PathProjectIdKey::new(format!("{}\0", mqueue_path), PROJ_ID);
         let message_queue = MessageQueue::new(MessageQueueKey::PathKey(key)).create().init().unwrap();
         
         VCudaClientManager {
@@ -185,7 +187,7 @@ impl VCudaClientManager {
     }
 
     pub fn listen_to_clients<F>(&self, virt_server_getter: F) where F: Fn() -> Option<VirtServer> {
-        let key = PathProjectIdKey::new(self.mqueue_path.clone(), PROJ_ID);
+        let key = PathProjectIdKey::new(format!("{}\0", self.mqueue_path), PROJ_ID);
         let message_queue = MessageQueue::new(MessageQueueKey::PathKey(key)).create().init().unwrap();
         log::info!("Flyt client manager listening to clients...");
         loop {

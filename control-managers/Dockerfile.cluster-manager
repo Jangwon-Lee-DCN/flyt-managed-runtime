@@ -1,0 +1,18 @@
+FROM rust:1.98-bookworm AS build
+WORKDIR /src
+COPY Cargo.toml Cargo.lock build.rs ./
+COPY src ./src
+RUN cargo build --locked --release --no-default-features --bin flyt-cluster-manager --bin flytctl \
+    && install -d /out \
+    && install -m 0755 target/release/flyt-cluster-manager target/release/flytctl /out/ \
+    && rm -rf target
+
+FROM debian:bookworm-slim
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends ca-certificates libssl3 \
+    && rm -rf /var/lib/apt/lists/*
+COPY --from=build /out/flyt-cluster-manager /usr/local/bin/
+COPY --from=build /out/flytctl /usr/local/bin/
+USER 65532:65532
+ENV FLYT_CLUSTER_MANAGER_CONFIG=/etc/flyt/cluster-manager.toml
+ENTRYPOINT ["/usr/local/bin/flyt-cluster-manager"]

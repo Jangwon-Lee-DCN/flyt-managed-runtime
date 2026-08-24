@@ -551,6 +551,7 @@ static void print_hexmem(void *mem, size_t len)
 #define EIATTR_CUDA_API_VERSION         0x37
 
 #define EIFMT_NVAL                      0x1
+#define EIFMT_BVAL                      0x2
 #define EIFMT_HVAL                      0x3
 #define EIFMT_SVAL                      0x4
 
@@ -733,8 +734,8 @@ static int get_parm_for_kernel(Elf *elf, kernel_info_t *kernel, void* memory, si
             // }
             // printf("\n");
             secpos += sizeof(struct nv_info_kernel_entry) + entry->values_size-4;
-        } else if (entry->format == EIFMT_NVAL) {
-            // printf("nval\n");
+        } else if (entry->format == EIFMT_NVAL || entry->format == EIFMT_BVAL) {
+            // Both no-value and byte-value entries occupy one four-byte record.
             secpos += sizeof(struct nv_info_kernel_entry)-4;
         } else {
             LOGE(LOG_WARNING, "unknown format: %#x", entry->format);

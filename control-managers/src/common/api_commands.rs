@@ -15,6 +15,7 @@ impl FlytApiCommand {
     pub const RMGR_CLIENTD_DEALLOC_VIRT_SERVER: &'static str = "RMGR_CLIENTD_DEALLOC_VIRT_SERVER";
     pub const RMGR_SNODE_DEALLOC_VIRT_SERVER: &'static str = "RMGR_SNODE_DEALLOC_VIRT_SERVER";
     pub const RMGR_SNODE_SEND_GPU_INFO: &'static str = "RMGR_SNODE_SEND_GPU_INFO";
+    pub const SNODE_RMGR_REGISTER: &'static str = "SNODE_RMGR_REGISTER";
     pub const RMGR_SNODE_ALLOC_VIRT_SERVER: &'static str = "RMGR_SNODE_ALLOC_VIRT_SERVER";
     pub const RMGR_SNODE_CHANGE_RESOURCES: &'static str = "RMGR_SNODE_CHANGE_RESOURCES";
     pub const SNODE_VIRTS_CHANGE_RESOURCES: &'static str = "SNODE_VIRTS_CHANGE_RESOURCES";
@@ -35,4 +36,8 @@ impl FrontEndCommand {
     pub const CHANGE_SM_CORES_AND_MEMORY: &'static str = "CHANGE_SM_CORES_AND_MEMORY";
     pub const MIGRATE_VIRT_SERVER: &'static str = "MIGRATE_VIRT_SERVER";
     pub const MIGRATE_VIRT_SERVER_AUTO: &'static str = "MIGRATE_VIRT_SERVER_AUTO";
+    pub const UPSERT_SESSION: &'static str = "UPSERT_SESSION";
+    pub const GET_SESSION: &'static str = "GET_SESSION";
+    pub const DELETE_SESSION: &'static str = "DELETE_SESSION";
+    pub const GET_CAPABILITIES: &'static str = "GET_CAPABILITIES";
 }

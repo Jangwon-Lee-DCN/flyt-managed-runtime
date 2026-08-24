@@ -1444,6 +1444,7 @@ DEF_FN(cudnnStatus_t, cudnnSetDropoutDescriptor, cudnnDropoutDescriptor_t, dropo
 DEF_FN(cudnnStatus_t, cudnnRestoreDropoutDescriptor, cudnnDropoutDescriptor_t, dropoutDesc, cudnnHandle_t, handle, float, dropout, void *, states, size_t, stateSizeInBytes, unsigned long long, seed)
 DEF_FN(cudnnStatus_t, cudnnGetDropoutDescriptor, cudnnDropoutDescriptor_t, dropoutDesc, cudnnHandle_t, handle, float *, dropout, void **, states, unsigned long long *, seed)
 DEF_FN(cudnnStatus_t, cudnnDropoutForward, cudnnHandle_t, handle, const cudnnDropoutDescriptor_t, dropoutDesc, const cudnnTensorDescriptor_t, xdesc, const void *, x, const cudnnTensorDescriptor_t, ydesc, void *, y, void *, reserveSpace, size_t, reserveSpaceSizeInBytes)
+#if CUDNN_MAJOR < 9
 DEF_FN(cudnnStatus_t, cudnnCreateAlgorithmDescriptor, cudnnAlgorithmDescriptor_t *, algoDesc)
 DEF_FN(cudnnStatus_t, cudnnSetAlgorithmDescriptor, cudnnAlgorithmDescriptor_t, algoDesc, cudnnAlgorithm_t, algorithm)
 DEF_FN(cudnnStatus_t, cudnnGetAlgorithmDescriptor, const cudnnAlgorithmDescriptor_t, algoDesc, cudnnAlgorithm_t *, algorithm)
@@ -1456,6 +1457,7 @@ DEF_FN(cudnnStatus_t, cudnnDestroyAlgorithmPerformance, cudnnAlgorithmPerformanc
 DEF_FN(cudnnStatus_t, cudnnGetAlgorithmSpaceSize, cudnnHandle_t, handle, cudnnAlgorithmDescriptor_t, algoDesc, size_t *, algoSpaceSizeInBytes)
 DEF_FN(cudnnStatus_t, cudnnSaveAlgorithm, cudnnHandle_t, handle, cudnnAlgorithmDescriptor_t, algoDesc, void *, algoSpace, size_t, algoSpaceSizeInBytes)
 DEF_FN(cudnnStatus_t, cudnnRestoreAlgorithm, cudnnHandle_t, handle, void *, algoSpace, size_t, algoSpaceSizeInBytes, cudnnAlgorithmDescriptor_t, algoDesc)
+#endif
 DEF_FN(cudnnStatus_t, cudnnSetCallback, unsigned, mask, void *, udata, cudnnCallback_t, fptr)
 DEF_FN(cudnnStatus_t, cudnnGetCallback, unsigned *, mask, void **, udata, cudnnCallback_t *, fptr)
 DEF_FN(cudnnStatus_t, cudnnOpsInferVersionCheck)

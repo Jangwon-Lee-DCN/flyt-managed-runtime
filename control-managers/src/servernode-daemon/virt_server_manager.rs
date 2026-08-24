@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fs::File, path::Path, process::{Child, Command}, sync::{Arc, Mutex}, time::Duration};
+use std::{collections::HashMap, fs::File, path::Path, process::{Child, Command}, sync::{Arc, Mutex}, thread, time::{Duration, Instant}};
 use ipc_rs::MessageQueue;
 use crate::common::{api_commands::FlytApiCommand, types::MqueueClientControlCommand, utils::Utils};
 
@@ -32,7 +32,9 @@ impl VirtServerManager {
             File::create(mqueue_path).unwrap();
         }
 
-        let key = ipc_rs::PathProjectIdKey::new(mqueue_path.to_string(), PROJ_ID);
+        // ipc-rs passes the String buffer directly to ftok(3), which requires
+        // a NUL terminator. The Cricket server uses the same shared path.
+        let key = ipc_rs::PathProjectIdKey::new(format!("{}\0", mqueue_path), PROJ_ID);
         let message_queue = MessageQueue::new(ipc_rs::MessageQueueKey::PathKey(key)).create().init().unwrap();
         
 
@@ -88,6 +90,32 @@ impl VirtServerManager {
         }
 
         log::debug!("Received message from virt server: {:?}", Utils::convert_bytes_to_u32(response.unwrap().as_slice()));
+
+        // The server signals IPC initialization before svc_register(3) has
+        // necessarily published its TCP mapping. Returning the allocation at
+        // that point races remote clients, so rpcbind publication is part of
+        // server readiness.
+        let readiness_deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            let rpc_version = rpc_id.to_string();
+            let ready = Command::new("rpcinfo")
+                .args(["-t", "127.0.0.1", "99", rpc_version.as_str()])
+                .output()
+                .map(|output| output.status.success())
+                .unwrap_or(false);
+            if ready {
+                break;
+            }
+            if Instant::now() >= readiness_deadline {
+                log::error!("Virt server {} was not published through rpcbind", rpc_id);
+                virt_server_process.kill().map_err(|e| format!("Error killing unready virt server: {}", e))?;
+                return Err("Virt server RPC endpoint did not become ready".to_string());
+            }
+            if let Ok(Some(status)) = virt_server_process.try_wait() {
+                return Err(format!("Virt server exited before RPC readiness: {}", status));
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
 
         log::info!("Virt server initialized with rpc_id: {}", rpc_id);
         

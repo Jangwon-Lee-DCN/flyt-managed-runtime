@@ -103,6 +103,24 @@ impl<'a> FlytClientManager<'a> {
         clients.remove(ipaddr);
     }
 
+    /// Drain an externally managed client before its durable session is removed.
+    /// Repeated calls are safe after the client has already disconnected.
+    pub fn deallocate_and_remove(&self, ipaddr: &str) -> Result<(), String> {
+        if !self.exists(ipaddr) {
+            return Ok(());
+        }
+        let client = self.get_client(ipaddr).ok_or("Client not found".to_string())?;
+        if *client.is_active.read().unwrap() && client.stream.read().unwrap().is_some() {
+            self.stop_client(ipaddr)?;
+        }
+        self.set_client_status(ipaddr, false);
+        if self.get_client(ipaddr).and_then(|value| value.virt_server).is_some() {
+            self.deallocate_vm_resources(ipaddr)?;
+        }
+        self.remove_client(ipaddr);
+        Ok(())
+    }
+
     pub fn get_all_clients(&self) -> Vec<FlytClientNode> {
         let clients = self.clients.lock().unwrap();
         clients.values().cloned().collect()
@@ -256,7 +274,7 @@ impl<'a> FlytClientManager<'a> {
     }
 
     fn handle_flytclient<'b>(&'b self, mut stream: TcpStream, scope: &'b thread::Scope<'b, '_>) {
-        let client_ip = stream.peer_addr().unwrap().ip().to_string();
+        let observed_ip = stream.peer_addr().unwrap().ip().to_string();
 
         let stream_clone = match stream.try_clone() {
             Ok(stream) => stream,
@@ -275,6 +293,32 @@ impl<'a> FlytClientManager<'a> {
                 return;
             }
         };
+
+        let auth = match StreamUtils::read_response(&mut reader, 1) {
+            Ok(value) => value[0].split(',').map(str::to_string).collect::<Vec<_>>(),
+            Err(error) => {
+                let _ = stream.write_all(format!("401\n{}\n", error).as_bytes());
+                return;
+            }
+        };
+        if auth.len() != 3 {
+            let _ = stream.write_all(b"401\nInvalid session credential\n");
+            return;
+        }
+        let generation = match auth[1].parse::<u64>() {
+            Ok(value) => value,
+            Err(_) => { let _ = stream.write_all(b"401\nInvalid generation\n"); return; }
+        };
+        if let Err(error) = self.server_nodes_manager.validate_client(
+            &auth[0], generation, &auth[2], &observed_ip
+        ) {
+            let _ = stream.write_all(format!("401\n{}\n", error).as_bytes());
+            return;
+        }
+        // A rack relay can multiplex many clients behind one peer address.
+        // Use the authenticated workload identity for allocation and lifecycle
+        // keys; observed_ip is transport metadata only.
+        let client_ip = auth[0].clone();
         
         match command[0].as_str() {
             FlytApiCommand::CLIENTD_RMGR_CONNECT => {
@@ -400,4 +444,3 @@ impl<'a> FlytClientManager<'a> {
 
     
 }
-

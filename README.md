@@ -2,6 +2,15 @@
 
 Flyt is a elastic GPU provisioning framework for Virtual Machines. It is built on top of Cricket and uses the same virtualization layer. Flyt has a distributed framework that can be used to provision GPU resources over a cluster of GPUs.
 
+This downstream is maintained as **flyt-managed-runtime**. It adds a
+platform-neutral contract for externally managed session lifecycle and client
+authentication. See [MANAGED_RUNTIME.md](MANAGED_RUNTIME.md). OpenStack,
+KubeVirt, and other orchestrator-specific translation belongs in separate
+adapters.
+
+GPU-node packaging and the Kubernetes-neutral GPU Cell runtime contract are
+documented in [GPU_CELL.md](GPU_CELL.md).
+
 
 For Flyt to be able to insert the virtualization layer, the CUDA application has to link dynamically to the CUDA APIs. For this, you have to pass `-cudart shared` to `nvcc` during linking.
 
@@ -20,7 +29,9 @@ On the system where the Cricket server should be executed, the appropriate NVIDI
 
 # Building
 
-Before building FLyt, you need to edit the location of configuration files in `control-managers/src/common/config.rs`
+Cluster and client manager configuration paths can be supplied with
+`FLYT_CLUSTER_MANAGER_CONFIG` and `FLYT_CLIENT_MANAGER_CONFIG`. The upstream
+defaults remain available for compatibility.
 
 ```
 git clone https://github.com/RWTH-ACS/cricket.git
@@ -43,6 +54,12 @@ You need to run following modules:
 1. **flyt-cluster-manager:** This can be run on any machine in the cluster. It is responsible for managing the cluster of GPUs.
 2. **flyt-node-manager:** This should be run as a daemon on machines where the GPU is available. Before running the node manager, make sure that mps is enabled on the GPU. Also you need to set the environment variable `CUDA_MPS_ENABLE_PER_CTX_DEVICE_MULTIPROCESSOR_PARTITIONING=1` before running the node manager.
 3. **flyt-client-manager:** This should be run on the Virtual Machine as a daemon.
+
+`control-managers/Dockerfile.client-package` produces the immutable HTTPS-served
+guest bundle used by orchestrator adapters. The bundle includes its fixed
+installer, client manager, CUDA interception library, and systemd unit. Image
+approval remains scoped to the tested OS/architecture/CUDA ABI; packaging alone
+does not prove application compatibility.
 
 You should update the configuration files to point to the correct IP addresses/ports and other configurations.
 

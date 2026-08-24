@@ -1,0 +1,21 @@
+[Unit]
+Description=FLYT managed remote-GPU client
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+Environment=FLYT_CLIENT_MANAGER_CONFIG=/etc/flyt/client-manager.toml
+Environment=RUST_LOG=info
+ExecStart=/opt/flyt/bin/flyt-client-manager
+Restart=on-failure
+RestartSec=2
+RuntimeDirectory=flyt
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+PrivateTmp=true
+ReadWritePaths=/run/flyt
+
+[Install]
+WantedBy=multi-user.target

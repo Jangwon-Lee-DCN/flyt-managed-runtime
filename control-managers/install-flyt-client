@@ -1,0 +1,69 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+package=${1:?client package path}
+credential_file=${2:?credential file}
+session_file=${3:?session file}
+[[ $(id -u) == 0 ]] || { echo "installer must run as root" >&2; exit 1; }
+[[ -s $package && -s $credential_file && -s $session_file ]] || exit 1
+
+workload_id=$(sed -n 's/^FLYT_INSTANCE_UUID=//p' "$session_file")
+manager_endpoint=$(sed -n 's/^FLYT_MANAGER_ENDPOINT=//p' "$session_file")
+generation=$(sed -n 's/^FLYT_GENERATION=//p' "$session_file")
+credential=$(tr -d '\r\n' < "$credential_file")
+[[ $workload_id =~ ^[0-9A-Za-z-]{8,64}$ ]]
+[[ $manager_endpoint =~ ^tcp://[A-Za-z0-9._-]+:[0-9]{1,5}$ ]]
+[[ $generation =~ ^[1-9][0-9]*$ ]]
+[[ ${#credential} -ge 32 ]]
+manager=${manager_endpoint#tcp://}
+manager_host=${manager%:*}
+manager_port=${manager##*:}
+(( manager_port >= 1 && manager_port <= 65535 ))
+
+stage=$(mktemp -d /run/flyt-install.XXXXXX)
+trap 'rm -rf "$stage"' EXIT
+tar --extract --gzip --file "$package" --directory "$stage" \
+  --no-same-owner --no-same-permissions
+for file in flyt-client-manager cricket-client.so flyt-client-manager.service \
+  flyt-cuda-smoke flyt-cuda-smoke.bin libcudart.so.12; do
+  [[ -f $stage/$file && ! -L $stage/$file ]] || {
+    echo "client package lacks $file" >&2; exit 1;
+  }
+done
+
+install -d -m 0755 /opt/flyt/bin /opt/flyt/lib /etc/flyt \
+  /usr/local/cuda/lib64
+install -m 0755 "$stage/flyt-client-manager" /opt/flyt/bin/flyt-client-manager
+install -m 0755 "$stage/cricket-client.so" /opt/flyt/lib/cricket-client.so
+install -m 0755 "$stage/flyt-cuda-smoke" /opt/flyt/bin/flyt-cuda-smoke
+install -m 0755 "$stage/flyt-cuda-smoke.bin" /opt/flyt/bin/flyt-cuda-smoke.bin
+install -m 0644 "$stage/libcudart.so.12" /opt/flyt/lib/libcudart.so.12
+# Cricket resolves the original CUDA runtime under its upstream compatibility
+# names after its interposer has been preloaded.  Approved plain VM images do
+# not carry a CUDA toolkit, so provide those names from the immutable client
+# package instead of requiring image-specific CUDA installation.
+ln -sfn /opt/flyt/lib/libcudart.so.12 /usr/local/cuda/lib64/libcudarto.so
+ln -sfn /opt/flyt/lib/libcudart.so.12 /usr/local/cuda/lib64/libcudart.so
+cat > /etc/flyt/client-manager.toml <<EOF
+[resource-manager]
+address = "$manager_host"
+port = $manager_port
+
+[managed-session]
+workload-id = "$workload_id"
+generation = $generation
+credential = "$credential"
+
+[ipc]
+# This path is shared with injected processes even though the hardened daemon
+# has PrivateTmp=true.  cricket-client.so uses the same ftok(3) path.
+mqueue-path = "/run/flyt/client-manager.queue"
+
+[vcuda-client]
+process_monitor_period = 10
+EOF
+chmod 0600 /etc/flyt/client-manager.toml
+install -m 0644 "$stage/flyt-client-manager.service" \
+  /etc/systemd/system/flyt-client-manager.service
+systemctl daemon-reload
+systemctl enable --now flyt-client-manager.service

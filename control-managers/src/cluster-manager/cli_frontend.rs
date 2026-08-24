@@ -7,7 +7,7 @@ use std::{
 
 use clap::{Parser, Subcommand};
 use comfy_table::Table;
-use common::{api_commands::FrontEndCommand, config::RMGR_CONFIG_PATH};
+use common::{api_commands::FrontEndCommand, config::cluster_manager_config_path};
 
 use crate::common::utils::StreamUtils;
 
@@ -64,7 +64,7 @@ pub struct NewResourcesOption {
 }
 
 pub fn get_stream_path() -> String {
-    let config = common::utils::Utils::load_config_file(RMGR_CONFIG_PATH);
+    let config = common::utils::Utils::load_config_file(&cluster_manager_config_path());
     config["ipc"]["frontend-socket"]
         .as_str()
         .unwrap()

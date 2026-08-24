@@ -15,7 +15,7 @@
 #include "flyt-cr.h"
 #include <signal.h>
 
-#define SNODE_MQUEUE_PATH "/tmp/flyt-servernode-queue"
+#define SNODE_MQUEUE_PATH "/run/flyt/node-manager.queue"
 #define PROJ_ID 0x42
 
 const char* SNODE_VIRTS_CHANGE_RESOURCES = "SNODE_VIRTS_CHANGE_RESOURCES";

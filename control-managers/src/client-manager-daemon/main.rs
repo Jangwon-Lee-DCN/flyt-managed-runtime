@@ -8,18 +8,18 @@ mod common;
 
 
 use std::thread;
-use common::{config::CLMGR_CONFIG_PATH, utils::Utils};
+use common::{config::client_manager_config_path, utils::Utils};
 use vcuda_client_handler::VCudaClientManager;
 
 use crate::resource_manager_handler::ResourceManagerHandler;
 
 fn get_mqueue_path() -> String {
-    let config = Utils::load_config_file(CLMGR_CONFIG_PATH);
+    let config = Utils::load_config_file(&client_manager_config_path());
     config["ipc"]["mqueue-path"].as_str().unwrap().to_string()
 }
 
 fn get_vcuda_process_monitor_period() -> u64 {
-    let config = Utils::load_config_file(CLMGR_CONFIG_PATH);
+    let config = Utils::load_config_file(&client_manager_config_path());
 
     let period = || -> Option<u64> {
         Some(config.get("vcuda-client")?.get("process_monitor_period")?.as_integer()? as u64)
@@ -32,7 +32,7 @@ fn get_vcuda_process_monitor_period() -> u64 {
 }
 
 fn get_resource_mgr_address() -> (String, u16) {
-    let config = Utils::load_config_file(CLMGR_CONFIG_PATH);
+    let config = Utils::load_config_file(&client_manager_config_path());
 
     (config["resource-manager"]["address"].as_str().unwrap().to_string(), config["resource-manager"]["port"].as_integer().unwrap() as u16)
 }
