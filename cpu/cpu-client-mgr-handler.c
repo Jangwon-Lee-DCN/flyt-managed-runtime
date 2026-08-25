@@ -15,7 +15,7 @@
 #include "log.h"
 #include "msg-handler.h"
 
-#define CLIENTD_MQUEUE_PATH "/tmp/flyt-client-mgr"
+#define CLIENTD_MQUEUE_PATH "/run/flyt/client-manager.queue"
 
 const char* CLIENTD_VCUDA_PAUSE = "CLIENTD_VCUDA_PAUSE";
 const char* CLIENTD_VCUDA_CHANGE_VIRT_SERVER = "CLIENTD_VCUDA_CHANGE_VIRT_SERVER";

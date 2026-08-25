@@ -1,6 +1,6 @@
 use std::{fs, io::BufReader, os::unix::net::{UnixListener, UnixStream}, path::Path};
 
-use crate::{client_handler::FlytClientManager, common::{api_commands::FrontEndCommand, utils::StreamUtils}, servernode_handler::ServerNodesManager};
+use crate::{bookkeeping::{VMResources, VMResourcesGetter}, client_handler::FlytClientManager, common::{api_commands::FrontEndCommand, utils::StreamUtils}, servernode_handler::ServerNodesManager};
 
 
 #[derive(PartialEq, Debug)]
@@ -13,13 +13,15 @@ enum ChangeConfigFor {
 pub struct FrontendHandler<'a> {
     client_mgr: &'a FlytClientManager<'a>,
     server_nodes_manager: &'a ServerNodesManager<'a>,
+    resources: &'a VMResourcesGetter,
 }
 
 impl <'a> FrontendHandler<'a> {
-    pub fn new(client_mgr: &'a FlytClientManager, server_nodes_manager: &'a ServerNodesManager) -> Self {
+    pub fn new(client_mgr: &'a FlytClientManager, server_nodes_manager: &'a ServerNodesManager, resources: &'a VMResourcesGetter) -> Self {
         FrontendHandler {
             client_mgr,
             server_nodes_manager,
+            resources,
         }
     }
 
@@ -46,7 +48,7 @@ impl <'a> FrontendHandler<'a> {
         }
     }
 
-    fn handle_request(&self, stream: UnixStream) {
+    fn handle_request(&self, mut stream: UnixStream) {
         let reader_clone = match stream.try_clone() {
             Ok(stream) => stream,
             Err(e) => {
@@ -89,9 +91,73 @@ impl <'a> FrontendHandler<'a> {
             FrontEndCommand::MIGRATE_VIRT_SERVER_AUTO => {
                 self.migrate_vm_auto(stream, reader);
             }
+            FrontEndCommand::UPSERT_SESSION => self.upsert_session(stream, reader),
+            FrontEndCommand::GET_SESSION => self.get_session(stream, reader),
+            FrontEndCommand::DELETE_SESSION => self.delete_session(stream, reader),
+            FrontEndCommand::GET_CAPABILITIES => {
+                let _ = StreamUtils::write_all(
+                    &mut stream,
+                    "200\nmanaged-session-v1,whole-gpu-mps,mig\n".to_string(),
+                );
+            }
             _ => {
                 log::error!("Invalid command: {}", command);
             }
+        }
+    }
+
+    fn upsert_session(&self, mut stream: UnixStream, mut reader: BufReader<UnixStream>) {
+        let values = match StreamUtils::read_response(&mut reader, 1) {
+            Ok(lines) => lines[0].split(',').map(str::to_string).collect::<Vec<_>>(),
+            Err(error) => {
+                let _ = StreamUtils::write_all(&mut stream, format!("400\n{}\n", error));
+                return;
+            }
+        };
+        if values.len() != 10 {
+            let _ = StreamUtils::write_all(&mut stream, "400\nExpected 10 fields\n".to_string());
+            return;
+        }
+        let resources = VMResources {
+            workload_id: Some(values[0].clone()), tenant_id: Some(values[1].clone()),
+            attachment_id: Some(values[2].clone()), client_address: values[3].clone(), preferred_node: values[4].clone(),
+            profile: Some(values[5].clone()),
+            compute_units: match values[6].parse() { Ok(value) => value, Err(_) => { let _ = StreamUtils::write_all(&mut stream, "400\nInvalid compute units\n".to_string()); return; } },
+            memory: match values[7].parse() { Ok(value) => value, Err(_) => { let _ = StreamUtils::write_all(&mut stream, "400\nInvalid memory\n".to_string()); return; } },
+            generation: match values[8].parse() { Ok(value) => Some(value), Err(_) => { let _ = StreamUtils::write_all(&mut stream, "400\nInvalid generation\n".to_string()); return; } },
+            state: Some(if self.server_nodes_manager.get_all_server_nodes().is_empty() { "PENDING_CAPACITY" } else { "SESSION_CREATED" }.to_string()),
+            credential_hash: Some(crate::bookkeeping::credential_hash(&values[9])),
+        };
+        match self.resources.upsert_session(&resources) {
+            Ok(()) => { let _ = StreamUtils::write_all(&mut stream, format!("200\n{}\n", resources.state.unwrap())); },
+            Err(error) => { let _ = StreamUtils::write_all(&mut stream, format!("500\n{}\n", error)); },
+        }
+    }
+
+    fn get_session(&self, mut stream: UnixStream, mut reader: BufReader<UnixStream>) {
+        let uuid = match StreamUtils::read_line(&mut reader) { Ok(value) => value, Err(error) => { let _ = StreamUtils::write_all(&mut stream, format!("400\n{}\n", error)); return; } };
+        match self.resources.get_session(&uuid) {
+            Ok(Some(value)) => { let _ = StreamUtils::write_all(&mut stream, format!("200\n{},{},{},{}\n", value.workload_id.unwrap_or_default(), value.client_address, value.generation.unwrap_or_default(), value.state.unwrap_or_default())); },
+            Ok(None) => { let _ = StreamUtils::write_all(&mut stream, "404\nSession not found\n".to_string()); },
+            Err(error) => { let _ = StreamUtils::write_all(&mut stream, format!("500\n{}\n", error)); },
+        }
+    }
+
+    fn delete_session(&self, mut stream: UnixStream, mut reader: BufReader<UnixStream>) {
+        let uuid = match StreamUtils::read_line(&mut reader) { Ok(value) => value, Err(error) => { let _ = StreamUtils::write_all(&mut stream, format!("400\n{}\n", error)); return; } };
+        let session = match self.resources.get_session(&uuid) {
+            Ok(value) => value,
+            Err(error) => { let _ = StreamUtils::write_all(&mut stream, format!("500\n{}\n", error)); return; },
+        };
+        if let Some(value) = session {
+            if let Err(error) = self.client_mgr.deallocate_and_remove(&value.client_address) {
+                let _ = StreamUtils::write_all(&mut stream, format!("409\n{}\n", error));
+                return;
+            }
+        }
+        match self.resources.delete_session(&uuid) {
+            Ok(()) => { let _ = StreamUtils::write_all(&mut stream, "200\nDELETED\n".to_string()); },
+            Err(error) => { let _ = StreamUtils::write_all(&mut stream, format!("500\n{}\n", error)); },
         }
     }
 

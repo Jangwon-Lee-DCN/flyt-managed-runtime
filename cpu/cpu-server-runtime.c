@@ -463,7 +463,7 @@ bool_t cuda_set_device_1_svc(int device, int *result, struct svc_req *rqstp)
     RECORD_API(int);
     RECORD_SINGLE_ARG(device);
     LOGE(LOG_DEBUG, "cudaSetDevice(%d)", device);
-    *result = cudaSuccess;
+    *result = device == 0 ? cudaSuccess : cudaErrorInvalidDevice;
     RECORD_RESULT(integer, *result);
     GSCHED_RELEASE;
     return 1;
@@ -643,7 +643,6 @@ bool_t cuda_stream_create_1_svc(ptr_result *result, struct svc_req *rqstp)
             cudaStreamDestroy(newStream);
         }
 
-        server_driver_reload_modules_data(client);
     }
 
 
@@ -681,7 +680,6 @@ bool_t cuda_stream_create_with_flags_1_svc(int flags, ptr_result *result, struct
             cudaStreamDestroy(newStream);
         }
 
-        server_driver_reload_modules_data(client);
     }
 
     RECORD_RESULT(ptr_result_u, *result);
@@ -719,7 +717,6 @@ bool_t cuda_stream_create_with_priority_1_svc(int flags, int priority, ptr_resul
             cudaStreamDestroy(newStream);
         }
 
-        server_driver_reload_modules_data(client);
     }
     
     RECORD_RESULT(ptr_result_u, *result);
@@ -1103,7 +1100,17 @@ bool_t cuda_func_set_attributes_1_svc(ptr func, int attr, int value, int *result
     RECORD_ARG(2, attr);
     RECORD_ARG(3, value);
     LOGE(LOG_DEBUG, "cudaFuncSetAttributes");
-    *result = cudaFuncSetAttribute((void*)func, attr, value);
+    GET_CLIENT(*result)
+    addr_data_pair_t *func_ptr;
+    if (resource_mg_get(&client->functions, (void*)func,
+                        (void**)&func_ptr) != 0) {
+        LOGE(LOG_ERROR, "error getting function");
+        *result = cudaErrorInvalidValue;
+        GSCHED_RELEASE;
+        return 1;
+    }
+    *result = (int)cuFuncSetAttribute(
+        (CUfunction)func_ptr->addr, (CUfunction_attribute)attr, value);
     RECORD_RESULT(integer, *result);
     GSCHED_RELEASE;
     return 1;

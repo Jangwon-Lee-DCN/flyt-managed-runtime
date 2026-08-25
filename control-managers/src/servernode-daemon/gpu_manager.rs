@@ -1,8 +1,8 @@
 
-use nvml_wrapper::{enum_wrappers::device::Clock, Nvml};
-
 extern "C" {
     fn get_gpu_cores(device_id: u32) -> i32;
+    fn get_cuda_device_count() -> i32;
+    fn get_gpu_total_memory(device_id: u32) -> u64;
 }
 
 #[derive(Debug,Clone)]
@@ -47,23 +47,29 @@ impl GPUManager {
 
 pub fn get_all_gpus() -> Option<Vec<GPU>> {
     
-    let nvml = Nvml::init().ok()?;
-    let num_devices = nvml.device_count().ok()?;
+    // CUDA enumerates only devices exposed by the container's CDI/DRA
+    // allocation, while NVML may expose the physical parent of a MIG slice.
+    let cuda_device_count = unsafe { get_cuda_device_count() };
+    if cuda_device_count < 1 {
+        log::error!("CUDA did not enumerate an allocated GPU or MIG device");
+        return None;
+    }
+    let num_devices = cuda_device_count as u32;
 
     let mut gpus = Vec::new();
 
     for i in 0..num_devices {
-        let device = nvml.device_by_index(i).ok()?;
-        let name = device.name().ok()?;
-        let memory = device.memory_info().ok()?.free;
-        let max_clock = device.max_clock_info(Clock::SM).ok()?;
+        let memory = unsafe { get_gpu_total_memory(i) };
         let sm_cores = unsafe { get_gpu_cores(i) };
-        let total_cores = device.num_cores().ok()?;
 
-        if sm_cores == -1 {
+        if sm_cores == -1 || memory == 0 {
             log::error!("Error getting SM cores for GPU {}", i);
             continue;
-        } 
+        }
+
+        let name = format!("CUDA-visible-device-{}", i);
+        let max_clock = 0;
+        let total_cores = sm_cores as u32;
 
         let gpu_id = i;
 

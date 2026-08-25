@@ -2,6 +2,9 @@
 address = "192.165.32.54"
 port = 8000
 
+[network]
+advertise-address = "192.0.2.10"
+
 [virt-server]
 program-path = ""
 

@@ -1,0 +1,14 @@
+[resource-manager]
+address = "flyt-cluster-manager"
+port = 12401
+
+[network]
+advertise-address = "192.0.2.10"
+
+[virt-server]
+program-path = "/opt/flyt/bin/cricket-rpc-server"
+thread-mode = 0
+program-args = ""
+
+[ipc]
+mqueue-path = "/run/flyt/node-manager.queue"

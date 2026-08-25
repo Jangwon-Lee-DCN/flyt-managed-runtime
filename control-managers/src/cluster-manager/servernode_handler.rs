@@ -11,7 +11,7 @@ use crate::common::utils::StreamUtils;
 use std::collections::HashMap;
 use std::{fs, thread};
 use std::io::{ BufReader, Write };
-use std::net::{TcpListener, TcpStream};
+use std::net::{IpAddr, TcpListener, TcpStream};
 use std::path::Path;
 use std::sync::{Arc, Mutex, RwLock};
 
@@ -79,6 +79,13 @@ impl<'a> ServerNodesManager<'a> {
         }
     }
 
+    pub fn validate_client(&self, workload_id: &str, generation: u64,
+                           credential: &str, observed_ip: &str) -> Result<(), String> {
+        self.vm_resource_getter.validate_client(
+            workload_id, generation, credential, observed_ip
+        )
+    }
+
     pub fn add_server_node(&self, server_node: ServerNode) {
         let mut server_nodes = self.server_nodes.lock().unwrap();
         server_nodes.insert(server_node.ipaddr.clone(), server_node);
@@ -124,7 +131,7 @@ impl<'a> ServerNodesManager<'a> {
     }
 
     fn handle_servernode(&self, stream: TcpStream) {
-        let server_ip = match stream.peer_addr() {
+        let transport_peer = match stream.peer_addr() {
             Ok(addr) => addr.ip().to_string(),
             Err(e) => {
                 log::error!("Error getting ip address of serverndoe: {}", e);
@@ -140,9 +147,23 @@ impl<'a> ServerNodesManager<'a> {
             }
         };
 
-        let reader = BufReader::new(reader_clone);
+        let mut reader = BufReader::new(reader_clone);
+        let command = match StreamUtils::read_line(&mut reader) {
+            Ok(value) => value,
+            Err(error) => { log::error!("Error reading server-node registration: {}", error); return; }
+        };
+        if command != FlytApiCommand::SNODE_RMGR_REGISTER {
+            log::error!("Server node did not register an advertised address");
+            return;
+        }
+        let server_ip = match StreamUtils::read_line(&mut reader)
+            .ok().and_then(|value| value.parse::<IpAddr>().ok()) {
+            Some(value) if !value.is_unspecified() && !value.is_loopback() => value.to_string(),
+            _ => { log::error!("Server node advertised an invalid address"); return; }
+        };
     
-        log::info!("Server node connected: {}", server_ip);
+        log::info!("Server node connected: {} (transport peer {})", server_ip,
+                   transport_peer);
 
         if self.exists(&server_ip) {
             log::info!("Server node already exists: {}", server_ip);
@@ -220,7 +241,7 @@ impl<'a> ServerNodesManager<'a> {
     }
 
     fn get_free_gpu(&self, required_resources: &VMResources) -> Option<(String, u64)> {
-        let host_server_node = self.get_server_node(&required_resources.host_ip);
+        let host_server_node = self.get_server_node(&required_resources.preferred_node);
         
         if host_server_node.is_some() {
             let host_server_node = host_server_node.unwrap();
@@ -245,14 +266,15 @@ impl<'a> ServerNodesManager<'a> {
     
     }
 
-    pub fn allocate_vm_resources(&self, client_ip: &String,) -> Result<Arc<RwLock<VirtServer>>,String> {
-        let vm_required_resources = self.vm_resource_getter.get_vm_required_resources(client_ip);
+    pub fn allocate_vm_resources(&self, workload_id: &String,) -> Result<Arc<RwLock<VirtServer>>,String> {
+        let vm_required_resources = self.vm_resource_getter.get_session(workload_id)
+            .map_err(|error| error.to_string())?;
         
-        log::info!("Allocating VM resources for client: {}", client_ip);
+        log::info!("Allocating VM resources for workload: {}", workload_id);
         log::info!("VM resources required: {:?}", vm_required_resources);
 
         if vm_required_resources.is_none() {
-            log::error!("VM resources not found for client: {}", client_ip);
+            log::error!("VM resources not found for workload: {}", workload_id);
             return Err("VM resources not found".to_string());
         }
 
@@ -261,7 +283,7 @@ impl<'a> ServerNodesManager<'a> {
         let target_gpu = self.get_free_gpu(&vm_required_resources);
 
         if target_gpu.is_none() {
-            log::error!("No free GPU found for client: {}", client_ip);
+            log::error!("No free GPU found for workload: {}", workload_id);
             return Err("No free GPU found".to_string());
         }
 
@@ -270,7 +292,7 @@ impl<'a> ServerNodesManager<'a> {
         let virt_server = self.create_virt_server(&target_server_ip, target_gpu_id, vm_required_resources.compute_units, vm_required_resources.memory, false);
 
         if virt_server.is_err() {
-            log::error!("Error creating virt server for client: {}", client_ip);
+            log::error!("Error creating virt server for workload: {}", workload_id);
             return Err("Error creating virt server".to_string());
         }
 
@@ -695,4 +717,3 @@ fn check_resource_availability(server_node: &ServerNode, vm_resources: &VMResour
     }
     None
 }
-

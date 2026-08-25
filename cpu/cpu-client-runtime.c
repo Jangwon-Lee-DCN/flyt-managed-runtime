@@ -16,6 +16,7 @@
 #include <sys/stat.h>
 #include <fcntl.h>
 #include <unistd.h>
+#include <dlfcn.h>
 
 #include "cpu-libwrap.h"
 #include "cpu_rpc_prot.h"
@@ -38,6 +39,58 @@ void cpu_runtime_print_api_call_cnt(void)
     LOG(LOG_INFO, "memcpy-cnt: %d", memcpy_cnt);
 }
 #endif //WITH_API_CNT
+
+#ifdef cudaGetDriverEntryPoint
+#undef cudaGetDriverEntryPoint
+#endif
+#ifdef cudaGetDriverEntryPointByVersion
+#undef cudaGetDriverEntryPointByVersion
+#endif
+
+static cudaError_t flyt_get_driver_entry_point(
+    const char *symbol, void **func_ptr,
+    enum cudaDriverEntryPointQueryResult *driver_status)
+{
+    void *entry;
+    const char *error;
+
+    if (symbol == NULL || func_ptr == NULL) {
+        return cudaErrorInvalidValue;
+    }
+    dlerror();
+    entry = dlsym(RTLD_DEFAULT, symbol);
+    error = dlerror();
+    if (error != NULL || entry == NULL) {
+        *func_ptr = NULL;
+        if (driver_status != NULL) {
+            *driver_status = cudaDriverEntryPointSymbolNotFound;
+        }
+        return cudaSuccess;
+    }
+    *func_ptr = entry;
+    if (driver_status != NULL) {
+        *driver_status = cudaDriverEntryPointSuccess;
+    }
+    return cudaSuccess;
+}
+
+cudaError_t cudaGetDriverEntryPoint(
+    const char *symbol, void **func_ptr, unsigned long long flags,
+    enum cudaDriverEntryPointQueryResult *driver_status)
+{
+    (void)flags;
+    return flyt_get_driver_entry_point(symbol, func_ptr, driver_status);
+}
+
+cudaError_t cudaGetDriverEntryPointByVersion(
+    const char *symbol, void **func_ptr, unsigned int cuda_version,
+    unsigned long long flags,
+    enum cudaDriverEntryPointQueryResult *driver_status)
+{
+    (void)cuda_version;
+    (void)flags;
+    return flyt_get_driver_entry_point(symbol, func_ptr, driver_status);
+}
 
 
 cudaError_t cudaChooseDevice(int* device, const struct cudaDeviceProp* prop)
@@ -840,6 +893,24 @@ cudaError_t cudaEventRecord(cudaEvent_t event, cudaStream_t stream)
     return result;
 }
 
+cudaError_t cudaEventRecordWithFlags(
+    cudaEvent_t event, cudaStream_t stream, unsigned int flags)
+{
+#ifdef WITH_API_CNT
+    api_call_cnt++;
+#endif
+    int result;
+    enum clnt_stat status;
+    FUNC_BEGIN
+    status = cuda_event_record_with_flags_1(
+        (ptr)event, (ptr)stream, (int)flags, &result, clnt);
+    FUNC_END
+    if (status != RPC_SUCCESS) {
+        clnt_perror(clnt, "call failed");
+    }
+    return result;
+}
+
 cudaError_t cudaEventSynchronize(cudaEvent_t event)
 {
 #ifdef WITH_API_CNT
@@ -1103,6 +1174,19 @@ cudaError_t cudaLaunchKernel(const void* func, dim3 gridDim, dim3 blockDim, void
     }
     free(rpc_args.mem_data_val);
     return result;
+}
+
+cudaError_t cudaLaunchKernelExC(
+    const cudaLaunchConfig_t *config, const void *func, void **args)
+{
+    if (config == NULL) {
+        return cudaErrorInvalidValue;
+    }
+    if (config->numAttrs != 0) {
+        return cudaErrorNotSupported;
+    }
+    return cudaLaunchKernel(func, config->gridDim, config->blockDim, args,
+                            config->dynamicSmemBytes, config->stream);
 }
 
 DEF_FN(cudaError_t, cudaSetDoubleForDevice, double*, d)

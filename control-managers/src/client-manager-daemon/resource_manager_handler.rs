@@ -1,6 +1,7 @@
 use std::{io::{BufRead, BufReader, Write}, net::TcpStream, sync::RwLock, thread};
 use crate::common::utils::StreamUtils;
 use crate::common::api_commands::FlytApiCommand;
+use crate::common::config::client_manager_config_path;
 use crate::vcuda_client_handler::VCudaClientManager;
 
 #[derive(Debug, Clone)]
@@ -18,7 +19,7 @@ pub struct ResourceManagerHandler<'b> {
 
 
 impl <'b> ResourceManagerHandler <'b> {
-    pub fn new(server_ip: String, server_port: u16, client_mgr: &'b VCudaClientManager) -> ResourceManagerHandler {
+    pub fn new(server_ip: String, server_port: u16, client_mgr: &'b VCudaClientManager) -> ResourceManagerHandler<'b> {
 
         ResourceManagerHandler {
             server_ip: server_ip,
@@ -66,7 +67,19 @@ impl <'b> ResourceManagerHandler <'b> {
     }
 
     fn read_virt_server_details(reader: &mut BufReader<TcpStream>, stream: &mut TcpStream) -> Option<VirtServer> {
-        match stream.write_all(format!("{}\n", FlytApiCommand::CLIENTD_RMGR_CONNECT).as_bytes()) {
+        let config = crate::common::utils::Utils::load_config_file(&client_manager_config_path());
+        let identity = match config.get("managed-session")
+            .or_else(|| config.get("openstack-session"))
+            .and_then(|value| value.as_table()) {
+            Some(value) => value,
+            None => { log::error!("managed-session config is missing"); return None; }
+        };
+        let workload_id = match identity.get("workload-id")
+            .or_else(|| identity.get("instance-uuid"))
+            .and_then(|value| value.as_str()) { Some(value) => value, None => return None };
+        let generation = match identity.get("generation").and_then(|value| value.as_integer()) { Some(value) => value, None => return None };
+        let credential = match identity.get("credential").and_then(|value| value.as_str()) { Some(value) => value, None => return None };
+        match stream.write_all(format!("{}\n{},{},{}\n", FlytApiCommand::CLIENTD_RMGR_CONNECT, workload_id, generation, credential).as_bytes()) {
             Ok(_) => {}
             Err(e) => {
                 log::error!("Error writing to stream: {}", e);
@@ -122,7 +135,16 @@ impl <'b> ResourceManagerHandler <'b> {
                 return false;
             }
         };
-        match stream.write_all(format!("{}\n", FlytApiCommand::CLIENTD_RMGR_ZERO_VCUDA_CLIENTS).as_bytes()) {
+        let config = crate::common::utils::Utils::load_config_file(&client_manager_config_path());
+        let identity = match config.get("managed-session")
+            .or_else(|| config.get("openstack-session"))
+            .and_then(|value| value.as_table()) { Some(value) => value, None => return false };
+        let workload_id = match identity.get("workload-id")
+            .or_else(|| identity.get("instance-uuid"))
+            .and_then(|value| value.as_str()) { Some(value) => value, None => return false };
+        let generation = match identity.get("generation").and_then(|value| value.as_integer()) { Some(value) => value, None => return false };
+        let credential = match identity.get("credential").and_then(|value| value.as_str()) { Some(value) => value, None => return false };
+        match stream.write_all(format!("{}\n{},{},{}\n", FlytApiCommand::CLIENTD_RMGR_ZERO_VCUDA_CLIENTS, workload_id, generation, credential).as_bytes()) {
             Ok(_) => {}
             Err(e) => {
                 log::error!("Error writing to stream: {}", e);
